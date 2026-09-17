@@ -1,0 +1,8 @@
+{
+  "name": "Jongiyoh.uz - Fito & Tabobat Video Studiyasi",
+  "description": "Tabiiy giyohlar, fitoterapiya, YMYL xavfsizlik standarti va salomatlik bo'yicha professional Reels & Shorts video yaratish tizimi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,4 +1,3 @@
-import { GoogleGenAI, Modality, GenerateContentResponse, Type } from "@google/genai";
 import { getJongiyohReelSystemInstruction, getVoiceName, SAMPLE_JONGIYOH_ARTICLES } from "../constants";
 import { 
   AIArticle, 
@@ -8,24 +7,41 @@ import {
   ReelStyle, 
   VisualGenre, 
   VoiceType, 
-  AspectRatio,
-  AIModelEngine,
-  ImageModelEngine,
-  VisualGenerationStrategy,
-  RecipeCardData
+  AspectRatio, 
+  AIModelEngine, 
+  ImageModelEngine, 
+  VisualGenerationStrategy, 
+  RecipeCardData 
 } from "../types";
 import { 
   resolveContextualStockImage, 
   getRandomStockImageForScene, 
   extractUnsplashPhotoId, 
-  markUnsplashIdUsed,
+  markUnsplashIdUsed, 
   resetUsedUnsplashHistory 
 } from "./stockImageService";
 
-// Initialize with process.env.API_KEY named parameter
-const getAI = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY! });
-};
+// Secure serverless proxy caller - zero API key exposure to browser
+async function callGeminiApi(action: string, payload: any): Promise<any> {
+  const res = await fetch('/api/gemini', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ action, payload })
+  });
+
+  if (!res.ok) {
+    let errMsg = 'Gemini API xatoligi';
+    try {
+      const errData = await res.json();
+      errMsg = errData.error || errMsg;
+    } catch (e) {}
+    throw new Error(errMsg);
+  }
+
+  return await res.json();
+}
 
 // Retry logic to handle intermittent API failures
 async function retry<T>(fn: () => Promise<T>, retries = 3, delay = 1000): Promise<T> {
@@ -222,7 +238,6 @@ export const fetchAndExtractArticle = async (urlOrTopic: string): Promise<AIArti
     return foundSample;
   }
 
-  const ai = getAI();
   const scrapedText = cleanInput.startsWith('http') ? await scrapeUrlContent(cleanInput) : null;
 
   const prompt = scrapedText
@@ -284,7 +299,7 @@ Maqoladan quyidagi ma'lumotlarni va QAT'IY FAKTLARNI (LOCKED FACTS) ajratib beri
 Return ONLY a JSON object conforming to the structure.`;
 
   try {
-    const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retry(() => callGeminiApi('generateContent', {
       model: 'gemini-3.8-flash',
       contents: prompt,
       config: {
@@ -574,7 +589,6 @@ export const generateAIXabarReelScript = async (
   genre: VisualGenre = VisualGenre.AUTO,
   modelEngine: AIModelEngine = AIModelEngine.GEMINI_3_8_FLASH
 ) => {
-  const ai = getAI();
   const systemInstruction = getJongiyohReelSystemInstruction(style, genre);
 
   const lockedFactsText = JSON.stringify(article.lockedFacts || {}, null, 2);
@@ -601,51 +615,51 @@ ESLATMA:
 `;
 
   try {
-    const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
+    const response = await retry(() => callGeminiApi('generateContent', {
       model: modelEngine || 'gemini-3.8-flash',
       contents: prompt,
       config: {
         systemInstruction,
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.OBJECT,
+          type: "object",
           properties: {
-            article_title: { type: Type.STRING },
-            category: { type: Type.STRING },
-            hook: { type: Type.STRING },
+            article_title: { type: "string" },
+            category: { type: "string" },
+            hook: { type: "string" },
             locked_facts: {
-              type: Type.OBJECT,
+              type: "object",
               properties: {
-                amounts: { type: Type.ARRAY, items: { type: Type.STRING } },
-                percentages: { type: Type.ARRAY, items: { type: Type.STRING } },
-                calculations: { type: Type.ARRAY, items: { type: Type.STRING } },
-                dates: { type: Type.ARRAY, items: { type: Type.STRING } },
-                legalClaims: { type: Type.ARRAY, items: { type: Type.STRING } },
-                otherCriticalFacts: { type: Type.ARRAY, items: { type: Type.STRING } }
+                amounts: { type: "array", items: { type: "string" } },
+                percentages: { type: "array", items: { type: "string" } },
+                calculations: { type: "array", items: { type: "string" } },
+                dates: { type: "array", items: { type: "string" } },
+                legalClaims: { type: "array", items: { type: "string" } },
+                otherCriticalFacts: { type: "array", items: { type: "string" } }
               }
             },
             scenes: {
-              type: Type.ARRAY,
+              type: "array",
               items: {
-                type: Type.OBJECT,
+                type: "object",
                 properties: {
-                  order: { type: Type.INTEGER },
-                  type: { type: Type.STRING },
-                  narration: { type: Type.STRING },
-                  headline: { type: Type.STRING },
-                  statText: { type: Type.STRING },
-                  visualMotion: { type: Type.STRING },
-                  isInfographic: { type: Type.BOOLEAN },
-                  visual_prompt_en: { type: Type.STRING }
+                  order: { type: "integer" },
+                  type: { type: "string" },
+                  narration: { type: "string" },
+                  headline: { type: "string" },
+                  statText: { type: "string" },
+                  visualMotion: { type: "string" },
+                  isInfographic: { type: "boolean" },
+                  visual_prompt_en: { type: "string" }
                 },
                 required: ["order", "type", "narration", "headline", "visual_prompt_en"]
               }
             },
-            full_script: { type: Type.STRING },
-            instagram_caption: { type: Type.STRING },
-            hashtags: { type: Type.ARRAY, items: { type: Type.STRING } },
-            cover_headline: { type: Type.STRING },
-            cover_subtitle: { type: Type.STRING }
+            full_script: { type: "string" },
+            instagram_caption: { type: "string" },
+            hashtags: { type: "array", items: { type: "string" } },
+            cover_headline: { type: "string" },
+            cover_subtitle: { type: "string" }
           },
           required: ["article_title", "scenes", "full_script", "instagram_caption", "cover_headline"]
         }
@@ -727,22 +741,16 @@ export const generateBusinessReelScript = generateAIXabarReelScript;
  * High quality Uzbek audio narration using Gemini TTS with phonetic pre-processing.
  */
 export const generateAudio = async (text: string, voiceType: VoiceType): Promise<string> => {
-  const ai = getAI();
   const voiceName = getVoiceName(voiceType);
   const phoneticText = prepareTextForTTS(text || "Jongiyoh nuqta uz. Tabiiy giyohlar va salomatlik sirlari.");
 
-  const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
-    model: "gemini-3.1-flash-tts-preview", 
-    contents: [{ parts: [{ text: phoneticText }] }],
-    config: {
-      responseModalities: [Modality.AUDIO],
-      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } },
-    },
+  const response = await retry(() => callGeminiApi('generateTTS', {
+    text: phoneticText,
+    voiceName
   }));
 
-  const base64 = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!base64) throw new Error("Audio hosil qilib bo'lmadi");
-  return base64;
+  if (!response?.audioBase64) throw new Error("Audio hosil qilib bo'lmadi");
+  return response.audioBase64;
 };
 
 const getAspectForGemini = (ratio: AspectRatio): '9:16' | '1:1' | '16:9' => {
@@ -760,7 +768,6 @@ export const generateSingleImage = async (
   aspectRatio: AspectRatio = AspectRatio.PORTRAIT,
   imageModel: ImageModelEngine = ImageModelEngine.FLASH_LITE_IMAGE
 ): Promise<string> => {
-  const ai = getAI();
   const geminiAspect = getAspectForGemini(aspectRatio);
   
   // Clean unnatural tokens
@@ -778,38 +785,15 @@ export const generateSingleImage = async (
     ? ImageModelEngine.FLASH_IMAGE 
     : ImageModelEngine.FLASH_LITE_IMAGE;
 
-  try {
-    const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: primaryModel,
-      contents: { parts: [{ text: enhancedPrompt }] },
-      config: {
-        imageConfig: {
-          aspectRatio: geminiAspect
-        }
-      },
-    }));
-
-    const part = response.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-    if (part?.inlineData?.data) {
-      return `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-    }
-  } catch (err) {
-    console.warn(`Primary image model ${primaryModel} encountered an issue, trying alternate:`, err);
-  }
-
-  const fallbackResponse = await retry<GenerateContentResponse>(() => ai.models.generateContent({
-    model: alternateModel,
-    contents: { parts: [{ text: enhancedPrompt }] },
-    config: {
-      imageConfig: {
-        aspectRatio: geminiAspect
-      }
-    },
+  const response = await retry(() => callGeminiApi('generateImage', {
+    prompt: enhancedPrompt,
+    aspectRatio: geminiAspect,
+    primaryModel,
+    alternateModel
   }));
 
-  const part = fallbackResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-  if (!part) throw new Error("Rasm yaratib bo'lmadi");
-  return `data:${part.inlineData?.mimeType};base64,${part.inlineData?.data}`;
+  if (!response?.dataUrl) throw new Error("Rasm yaratib bo'lmadi");
+  return response.dataUrl;
 };
 
 /**
@@ -938,8 +922,6 @@ export const transcribeAndSegmentAudio = async (
   audioBase64OrDataUrl: string,
   targetSceneCount: number = 6
 ): Promise<AudioTranscriptionResult> => {
-  const ai = getAI();
-  
   let base64Data = audioBase64OrDataUrl;
   let mimeType = 'audio/mp3';
 
@@ -973,22 +955,13 @@ Javobni FAQAT JSON formatida qaytaring:
 }`;
 
   try {
-    const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: [
-        {
-          inlineData: {
-            mimeType,
-            data: base64Data
-          }
-        },
-        {
-          text: prompt
-        }
-      ]
+    const response = await retry(() => callGeminiApi('transcribeAudio', {
+      audioBase64: base64Data,
+      mimeType,
+      prompt
     }));
 
-    const text = response.text;
+    const text = response?.text;
     if (text) {
       const parsed = parseResponse(text);
       const subs = ensureStringArray(parsed.subtitles, []);

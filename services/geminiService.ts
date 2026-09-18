@@ -1240,3 +1240,137 @@ Return ONLY a JSON object conforming to the schema.
   };
 };
 
+/**
+ * 7. VEO & OMNI OPTIMIZED SCRIPT GENERATOR:
+ * Strictly enforces the 15 Golden Rules from QOIDALAR.md:
+ *  - 11-14 Uzbek words per scene (avoids dead silence and avoids repetition)
+ *  - Dynamic cinematography (Medium -> Macro hands -> Teapot close-up -> Manuscript -> Nature walk -> CTA)
+ *  - No packaging hallucinations (strictly no fake boxes or random text)
+ */
+export const generateVeoOptimizedScript = async (
+  topicOrText: string,
+  options: { title?: string; targetClips?: number; modelEngine?: AIModelEngine } = {}
+) => {
+  const cleanInput = topicOrText.trim();
+  const { title, targetClips = 5, modelEngine = AIModelEngine.GEMINI_3_8_FLASH } = options;
+
+  const prompt = `
+Siz Google Veo 3.1 va Gemini Omni video modellari bo'yicha bosh rejissyor va ssenaristsiz.
+Foydalanuvchi taqdim etgan quyidagi mavzu yoki matn asosida O'zbekistondagi eng sifatli kinematik video ssenariysini yarating:
+
+${title ? `SARLAVHA: "${title}"` : ''}
+MAVZU / MATN:
+"""
+${cleanInput}
+"""
+
+QAT'IY QOIDALAR (BU QOIDALAR BUZILSA VIDEO SIFATSIZ CHIQADI):
+1. Aniq ${targetClips} ta kadr yarating (Kadr 1 dan Kadr ${targetClips} gacha).
+2. HAR BIR KADR OVOZ MATNI (narration) QAT'IY 11 TAdan 14 TAGACHA O'ZBEKCHA SO'Z BO'LSIN!
+   - 11 tadan kam bo'lsa: model bo'sh qolgan vaqtda so'zni takrorlaydi yoki 4 soniya jim tirjayib turadi!
+   - 14 tadan ko'p bo'lsa: 10 soniyaga sig'may, gap o'rtasida kesilib qoladi!
+   - Har bir gap tugallangan ma'noga ega bo'lsin.
+3. KADRLARNING XILMA-XIL REJISSURASI (Bitta yigit barcha kadrda qotib turishi TAQIQLANGAN):
+   - 1-kadr (Hook): O'rta plan (Medium shot) — samimiy qahramon tabiat fonida jilmayib muammoni aytadi.
+   - 2-kadr (Sabab/Modda): Ekstremal makro (Extreme macro) — qo'llarda quritilgan dorivor giyoh barglari va shudring.
+   - 3-kadr (Damlash/Retsept): Yaqin plan (Close-up) — shaffof shisha choynakka qaynoq suv quyiladi, bug' ko'tariladi.
+   - 4-kadr (Ogohlantirish/YMYL): Jiddiy va vazmin plan — qadimiy tabobat qo'lyozmasi yoki tarozi (buyrak toshi va homiladorlikda ehtiyotkorlik).
+   - 5-kadr (Harakat/Hayot): Keng plan (Wide tracking shot) — inson tog' qo'ynida yengil va erkin qadam tashlaydi.
+   - 6-kadr (CTA): Yaqin plan — choy piyolasi yonida smartfonda Telegram ochilgan (@jongiyoh_bot orqali doza hisoblash).
+4. TAQIQLAR:
+   - Modelga quti yoki qadoq chizishni BUYURMANG (chunki model harflarni buziq chizadi).
+   - Kiberpank, neon yoki sun'iy yorug'lik TAQIQLANGAN — faqat tabiiy quyosh nuri, haqiqiy tabiat, 35mm fotorealizm.
+
+Return ONLY a JSON object conforming to the schema.`;
+
+  try {
+    const response = await retry(() => callGeminiApi('generateContent', {
+      model: modelEngine || 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            article_title: { type: "string" },
+            scenes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  order: { type: "integer" },
+                  type: { type: "string" },
+                  narration: { type: "string" },
+                  headline: { type: "string" },
+                  statText: { type: "string" },
+                  camera_direction: { type: "string" },
+                  visual_prompt_en: { type: "string" }
+                },
+                required: ["order", "type", "narration", "headline", "camera_direction", "visual_prompt_en"]
+              }
+            },
+            full_script: { type: "string" },
+            instagram_caption: { type: "string" },
+            hashtags: { type: "array", items: { type: "string" } },
+            cover_headline: { type: "string" }
+          },
+          required: ["article_title", "scenes", "full_script", "cover_headline"]
+        }
+      }
+    }));
+
+    if (response?.text) {
+      const parsed = parseResponse(response.text);
+      const rawScenes = Array.isArray(parsed.scenes) && parsed.scenes.length >= 2 ? parsed.scenes : [];
+
+      if (rawScenes.length > 0) {
+        const resolvedTitle = parsed.article_title || title || cleanInput.slice(0, 45);
+
+        const normalizedScenes: ReelScene[] = rawScenes.map((s: any, idx: number) => {
+          const cleanNarration = cleanNarrationText(s.narration || "");
+          const isWarning = s.type === 'warning' || /qarshi|mumkin emas|taqiq|ehtiyot/i.test(`${s.headline} ${cleanNarration}`);
+
+          return {
+            id: `veo_scene_${Date.now()}_${idx}`,
+            order: s.order || idx + 1,
+            type: isWarning ? 'warning' : (s.type || (idx === 0 ? 'hook' : idx === rawScenes.length - 1 ? 'cta' : 'benefit')),
+            narration: cleanNarration,
+            headline: s.headline || (isWarning ? "⚠️ QARSHI KO'RSATMALAR" : idx === 0 ? "MUHIM MA'LUMOT" : "TAVSIYA"),
+            statText: s.statText || "",
+            visualMotion: 'push-in',
+            isInfographic: isWarning || !!s.statText,
+            visualPrompt: s.visual_prompt_en || `${s.camera_direction || 'Cinematic shot'}. Natural daylight, authentic 35mm documentary photography, strictly no text on screen.`,
+            infoCardData: s.statText ? {
+              title: s.headline || (isWarning ? "⚠️ DIQQAT" : "JONGIYOH"),
+              mainStat: s.statText,
+              subStat: "jongiyoh.uz",
+              label: isWarning ? "Xavfsizlik" : "Tavsiya"
+            } : undefined
+          };
+        });
+
+        const fullScript = normalizedScenes.map(s => s.narration).join('\n\n');
+
+        return {
+          articleTitle: resolvedTitle,
+          hook: normalizedScenes[0]?.narration || resolvedTitle,
+          scenes: normalizedScenes,
+          fullScript,
+          scriptSegments: normalizedScenes.map(s => s.narration),
+          imagePrompts: normalizedScenes.map(s => s.visualPrompt),
+          caption: parsed.instagram_caption || `🌿 ${resolvedTitle}\n\n${fullScript}\n\n💬 Shaxsiy xavfsiz doza: @jongiyoh_bot\n🌐 Rasmiy sayt: jongiyoh.uz`,
+          hashtags: ensureStringArray(parsed.hashtags, ["#jongiyoh", "#fitoterapiya", "#salomatlik", "#tabiiydavo", "#veo"]),
+          coverHeadline: parsed.cover_headline || resolvedTitle.slice(0, 28),
+          coverSubtitle: "JONGIYOH.UZ"
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("generateVeoOptimizedScript API failed, using fallback:", err);
+  }
+
+  // Fallback
+  return generateScriptFromText(cleanInput, { title, targetSceneCount: targetClips, modelEngine });
+};
+
+

@@ -51,6 +51,26 @@ export enum ImageModelEngine {
   FLASH_LITE_IMAGE = 'gemini-3.1-flash-lite-image', // Ultra-tezkor tabiiy vizual generatsiya
 }
 
+export enum VideoEngine {
+  CANVAS_2D = 'CANVAS_2D',   // ⚡ Tezkor & Tejamkor 2D Motion (Canvas + TTS + Karaoke, 25s, ~$0.02)
+  VEO_AI = 'VEO_AI',         // 🎬 Google Veo 3.1 & Omni (Tirik Aktyor, Harakatlanuvchi Video, ~$8.5)
+}
+
+export type VeoModelChoice = 'omni' | 'fast' | 'quality' | 'eco';
+
+export interface VeoJobState {
+  jobId: string;
+  status: 'pending' | 'running' | 'processing' | 'completed' | 'failed';
+  progress?: number;
+  currentClipIndex?: number;
+  clipCount?: number;
+  message?: string;
+  videoUrl?: string;
+  fullVideoUrl?: string;
+  clips?: string[];
+  error?: string;
+}
+
 export enum VisualGenerationStrategy {
   HYBRID = 'HYBRID',       // 4 ta AI + 3 ta Unsplash tabiiy foto (Tavsiya etiladi: tez & real)
   ALL_AI = 'ALL_AI',       // 100% AI generatsiya (barcha kadrlar AI tomonidan chiziladi)
@@ -234,6 +254,10 @@ export interface VideoData {
   visualGenre?: VisualGenre;
   reelStyle?: ReelStyle;
   recipeCard?: RecipeCardData;
+  videoEngine?: VideoEngine;
+  veoVideoUrl?: string;
+  veoJobId?: string;
+  veoModel?: VeoModelChoice;
 }
 
 export interface SavedProject {

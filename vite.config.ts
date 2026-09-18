@@ -1,7 +1,8 @@
-﻿import path from 'path';
+import path from 'path';
 import { defineConfig, loadEnv, Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import geminiApiHandler from './api/gemini';
+import veoApiHandler from './api/veo';
 
 function localApiPlugin(env: Record<string, string>): Plugin {
   return {
@@ -46,6 +47,50 @@ function localApiPlugin(env: Record<string, string>): Plugin {
               }
             };
             await geminiApiHandler(fakeReq, fakeRes);
+          } catch (err: any) {
+            res.statusCode = 500;
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({ error: err?.message || 'Server error' }));
+          }
+        });
+      });
+
+      server.middlewares.use('/api/veo', async (req, res) => {
+        if (req.method === 'OPTIONS') {
+          res.setHeader('Access-Control-Allow-Origin', '*');
+          res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+          res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+          res.statusCode = 200;
+          return res.end();
+        }
+
+        const url = new URL(req.url || '', `http://${req.headers.host || 'localhost'}`);
+        const query: Record<string, string> = {};
+        url.searchParams.forEach((v, k) => { query[k] = v; });
+
+        let body = '';
+        req.on('data', chunk => {
+          body += chunk;
+        });
+
+        req.on('end', async () => {
+          try {
+            const parsedBody = body ? JSON.parse(body) : {};
+            const fakeReq = { method: req.method || 'GET', body: parsedBody, query };
+            const fakeRes = {
+              setHeader(k: string, v: string) { res.setHeader(k, v); },
+              status(code: number) {
+                res.statusCode = code;
+                return {
+                  json(data: any) {
+                    res.setHeader('Content-Type', 'application/json');
+                    res.end(JSON.stringify(data));
+                  },
+                  end() { res.end(); }
+                };
+              }
+            };
+            await veoApiHandler(fakeReq, fakeRes);
           } catch (err: any) {
             res.statusCode = 500;
             res.setHeader('Content-Type', 'application/json');

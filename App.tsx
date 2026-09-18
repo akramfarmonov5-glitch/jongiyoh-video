@@ -17,7 +17,10 @@ import {
   AIModelEngine,
   ImageModelEngine,
   VisualGenerationStrategy,
-  RecipeCardData
+  RecipeCardData,
+  VideoEngine,
+  VeoModelChoice,
+  VeoJobState
 } from './types';
 import { 
   fetchAndExtractArticle, 
@@ -28,12 +31,20 @@ import {
   extractUnsplashPhotoId, 
   markUnsplashIdUsed, 
   generateSingleImage, 
-  resolveContextualStockImage,
+  resolveContextualStockImage, 
   ensureStringArray, 
   transcribeAndSegmentAudio, 
   splitScriptIntoScenes,
-  extractRecipeCardFromArticle
+  extractRecipeCardFromArticle,
+  generateVeoOptimizedScript
 } from './services/geminiService';
+import {
+  checkVeoHealth,
+  startVeoJob,
+  pollVeoJob,
+  mapReelScenesToVeoScenes,
+  VeoHealthResponse
+} from './services/veoService';
 import { 
   TRENDING_HERBS_TOPICS,
   SAMPLE_JONGIYOH_ARTICLES,
@@ -124,6 +135,15 @@ const App: React.FC = () => {
   const [imageModel, setImageModel] = useState<ImageModelEngine>(ImageModelEngine.FLASH_LITE_IMAGE);
   const [visualStrategy, setVisualStrategy] = useState<VisualGenerationStrategy>(VisualGenerationStrategy.HYBRID);
 
+  // 🎬 Dual Video Engine & Veo Studio State
+  const [videoEngine, setVideoEngine] = useState<VideoEngine>(VideoEngine.CANVAS_2D);
+  const [veoModel, setVeoModel] = useState<VeoModelChoice>('omni');
+  const [veoHealth, setVeoHealth] = useState<VeoHealthResponse | null>(null);
+  const [veoJobState, setVeoJobState] = useState<VeoJobState | null>(null);
+  const [isGeneratingVeo, setIsGeneratingVeo] = useState<boolean>(false);
+  const [veoAbortController, setVeoAbortController] = useState<AbortController | null>(null);
+  const [showVeoModal, setShowVeoModal] = useState<boolean>(false);
+
   // 🫖 Final Recipe Infographic Card State
   const [showRecipeCard, setShowRecipeCard] = useState<boolean>(true);
   const [recipeCardTiming, setRecipeCardTiming] = useState<'both' | 'recipe_scene' | 'video_end'>('both');
@@ -187,6 +207,17 @@ const App: React.FC = () => {
     } catch (e) {
       console.warn("Failed to load saved projects", e);
     }
+  }, []);
+
+  // Check Veo Backend Health on Mount
+  useEffect(() => {
+    checkVeoHealth()
+      .then(res => {
+        setVeoHealth(res);
+      })
+      .catch(() => {
+        setVeoHealth(null);
+      });
   }, []);
 
   // Sync recipe card data whenever videoData changes
@@ -508,6 +539,155 @@ const App: React.FC = () => {
         videoData: null
       });
     }
+  };
+
+  // MAIN GENERATION PIPELINE (Google Veo 3.1 & Omni Video Engine)
+  const handleGenerateVeoVideo = async (targetTopic?: string, targetText?: string) => {
+    // 1. Check Veo server health
+    const health = await checkVeoHealth();
+    if (!health || health.status !== 'ok') {
+      alert("⚠️ Google Veo serveri (localhost:3001) bilan aloqa o'rnatilmadi!\n\nIltimos, terminalda:\ncd c:\\Users\\pc\\Desktop\\loyihalarim\\veo-video-generator\nnpm run server\nbuyrug'ini ishga tushiring.");
+      return;
+    }
+
+    const topic = (targetTopic || selectedArticle?.title || rawTextTitle || articleUrl || "Dorivor Giyohlar").trim();
+    const content = targetText || rawTextInput || selectedArticle?.content || selectedArticle?.summary || articleUrl;
+
+    if (!topic && !content) {
+      alert("Iltimos, dorivor giyoh mavzusini yoki matnini kiriting!");
+      return;
+    }
+
+    const controller = new AbortController();
+    setVeoAbortController(controller);
+    setIsGeneratingVeo(true);
+    setShowVeoModal(true);
+    setState(prev => ({
+      ...prev,
+      isLoading: true,
+      loadingStep: "1/4: Veo 3.1 & Omni uchun 11-14 so'zli fito-ssenariy tuzilmoqda...",
+      error: null
+    }));
+
+    try {
+      // Step 1: Generate Veo Script strictly calibrated to 11-14 words & cinematic prompt without hallucinations
+      const scriptResult = await generateVeoOptimizedScript(content || topic, {
+        title: topic,
+        targetClips: 5,
+        modelEngine
+      });
+
+      // Step 2: Map to VeoScenes
+      const veoScenes = mapReelScenesToVeoScenes(scriptResult.scenes, topic);
+
+      setState(prev => ({
+        ...prev,
+        loadingStep: `2/4: Google Veo render navbatiga qo'yilmoqda (${veoModel === 'omni' ? 'Gemini Omni' : 'Veo 3.1 Fast'})...`
+      }));
+
+      // Step 3: Start Veo job
+      const startRes = await startVeoJob({
+        aspectRatio,
+        style: "Cinematic",
+        customScenes: veoScenes,
+        veoModel
+      });
+
+      if (!startRes.jobId) {
+        throw new Error("Veo backendidan jobId qabul qilinmadi");
+      }
+
+      // Step 4: Poll job progress
+      const finalJob = await pollVeoJob(
+        startRes.jobId,
+        {
+          onProgress: (job) => {
+            setVeoJobState(job);
+            setState(prev => ({
+              ...prev,
+              loadingStep: `3/4: Veo AI: ${job.progress ?? 50}% — ${job.message || 'Kadrlar render qilinmoqda...'}`
+            }));
+          },
+          abortSignal: controller.signal,
+          pollIntervalMs: 3000
+        }
+      );
+
+      if (finalJob.status === 'failed') {
+        throw new Error(finalJob.error || "Veo generatsiya jarayonida xatolik yuz berdi");
+      }
+
+      const finalVideoUrl = finalJob.fullVideoUrl || finalJob.videoUrl || '';
+
+      const newVideoData: VideoData = {
+        topic,
+        articleTitle: topic,
+        articleUrl: selectedArticle?.url || articleUrl,
+        hook: scriptResult.hook,
+        fullScript: scriptResult.fullScript,
+        script: scriptResult.scriptSegments,
+        scriptSegments: scriptResult.scriptSegments,
+        scenes: scriptResult.scenes,
+        images: finalJob.clips || [],
+        imagePrompts: scriptResult.imagePrompts,
+        audioBase64: '',
+        caption: scriptResult.caption,
+        instagramCaption: scriptResult.caption,
+        hashtags: scriptResult.hashtags,
+        coverHeadline: scriptResult.coverHeadline,
+        coverSubtitle: (scriptResult as any).coverSubtitle || "JONGIYOH.UZ",
+        lockedFacts: selectedArticle?.lockedFacts,
+        businessArticle: selectedArticle || undefined,
+        reelStyle,
+        visualGenre,
+        videoEngine: VideoEngine.VEO_AI,
+        veoVideoUrl: finalVideoUrl,
+        veoJobId: finalJob.jobId,
+        veoModel
+      };
+
+      setState({
+        isLoading: false,
+        loadingStep: '',
+        error: null,
+        videoData: newVideoData
+      });
+
+      saveProjectToHistory(newVideoData);
+      setIsGeneratingVeo(false);
+      setShowVeoModal(false);
+      setVeoJobState(null);
+      setVeoAbortController(null);
+
+    } catch (err: any) {
+      console.error("Veo generation error:", err);
+      setState(prev => ({
+        ...prev,
+        isLoading: false,
+        loadingStep: '',
+        error: "Google Veo generatsiya xatosi: " + (err?.message || "Noma'lum xatolik")
+      }));
+      setIsGeneratingVeo(false);
+      setShowVeoModal(false);
+      setVeoJobState(null);
+      setVeoAbortController(null);
+    }
+  };
+
+  const handleCancelVeoGeneration = () => {
+    if (veoAbortController) {
+      veoAbortController.abort();
+      setVeoAbortController(null);
+    }
+    setIsGeneratingVeo(false);
+    setShowVeoModal(false);
+    setVeoJobState(null);
+    setState(prev => ({
+      ...prev,
+      isLoading: false,
+      loadingStep: '',
+      error: "Veo generatsiyasi to'xtatildi."
+    }));
   };
 
   // CUSTOM MEDIA UPLOAD & SPEECH-TO-TEXT LOGIC
@@ -1133,6 +1313,111 @@ const App: React.FC = () => {
         {/* LEFT COLUMN: Controls & Generation Mode (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
           
+          {/* DUAL ENGINE SWITCH: 2D Canvas Motion vs Google Veo 3.1 & Omni */}
+          <div className="bg-[#052219] p-3.5 rounded-2xl border border-emerald-800/80 shadow-xl space-y-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-300">
+                  Studio Dvigateli (Engine):
+                </span>
+                {veoHealth?.status === 'ok' ? (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Veo Faol (localhost:3001)
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40" title="Veo generatsiyasi uchun veo-video-generator serverini yoqing">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    Veo Offline (localhost:3001)
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] font-mono text-emerald-400/80">
+                {videoEngine === VideoEngine.CANVAS_2D ? "⚡ Tezkor (~25s) • ~$0.02" : "🎬 Kino Sifat (~4m) • ~$8.5 GCP"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setVideoEngine(VideoEngine.CANVAS_2D)}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                  videoEngine === VideoEngine.CANVAS_2D
+                    ? 'bg-gradient-to-br from-emerald-900/90 to-[#072a20] border-emerald-400 text-white shadow-md shadow-emerald-500/10'
+                    : 'bg-[#041d15] border-emerald-900/80 text-emerald-300/70 hover:text-white hover:border-emerald-700'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-xs flex items-center gap-1.5">
+                    <span>⚡</span>
+                    <span>2D Kinematik Studio</span>
+                  </span>
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded font-bold">
+                    Kundalik postlar
+                  </span>
+                </div>
+                <p className="text-[10px] text-emerald-200/80 leading-snug">
+                  2D Motion Canvas + Gemini 3.1 Flash TTS + Zumrad Karaoke. Bir zumda tayyor bo'ladi.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setVideoEngine(VideoEngine.VEO_AI)}
+                className={`p-3 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-1.5 ${
+                  videoEngine === VideoEngine.VEO_AI
+                    ? 'bg-gradient-to-br from-purple-950/80 via-emerald-950 to-[#072a20] border-emerald-400 text-white shadow-lg shadow-emerald-500/20'
+                    : 'bg-[#041d15] border-emerald-900/80 text-emerald-300/70 hover:text-white hover:border-emerald-700'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-black text-xs flex items-center gap-1.5 text-emerald-300">
+                    <span>🎬</span>
+                    <span>Google Veo 3.1 & Omni</span>
+                  </span>
+                  <span className="text-[9px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.5 rounded font-bold">
+                    Target / Reklama
+                  </span>
+                </div>
+                <p className="text-[10px] text-emerald-200/80 leading-snug">
+                  Google Veo 3.1 va Gemini Omni bilan to'liq AI kino-video. Jimlik avtomatik qirqiladi.
+                </p>
+              </button>
+            </div>
+
+            {/* If Veo Engine is selected, show model choices */}
+            {videoEngine === VideoEngine.VEO_AI && (
+              <div className="p-2.5 rounded-xl bg-[#021811] border border-emerald-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold text-emerald-300">Veo Modeli:</span>
+                  <div className="flex bg-[#041d15] p-0.5 rounded-lg border border-emerald-800">
+                    <button
+                      type="button"
+                      onClick={() => setVeoModel('omni')}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                        veoModel === 'omni' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-emerald-400 hover:text-white'
+                      }`}
+                    >
+                      🗣️ Gemini Omni (Nutq bilan)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setVeoModel('fast')}
+                      className={`px-2.5 py-1 rounded-md text-[10px] font-bold transition cursor-pointer ${
+                        veoModel === 'fast' ? 'bg-emerald-500 text-slate-950 font-black' : 'text-emerald-400 hover:text-white'
+                      }`}
+                    >
+                      🎥 Veo 3.1 Fast (Kino B-roll)
+                    </button>
+                  </div>
+                </div>
+                <span className="text-[10px] text-emerald-400/80 font-mono">
+                  {veoModel === 'omni' ? "11-14 so'z/kadr • Nutqli personaj" : "Fotoreal kinematik harakat"}
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* TOP MODE TOGGLE TABS */}
           <div className="bg-[#072a20] p-1.5 rounded-2xl border border-emerald-900/80 grid grid-cols-3 gap-1.5 shadow-lg">
             <button
@@ -1233,7 +1518,11 @@ const App: React.FC = () => {
                         onChange={(e) => setArticleUrl(e.target.value)}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
-                            handleGenerateReel(articleUrl);
+                            if (videoEngine === VideoEngine.VEO_AI) {
+                              handleGenerateVeoVideo(articleUrl);
+                            } else {
+                              handleGenerateReel(articleUrl);
+                            }
                           }
                         }}
                         className="w-full bg-[#041d15] border border-emerald-800/80 rounded-xl pl-4 pr-10 py-3 text-sm text-white placeholder-emerald-700 focus:outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400 font-medium transition"
@@ -1271,12 +1560,18 @@ const App: React.FC = () => {
                         )}
                       </button>
                       <button
-                        onClick={() => handleGenerateReel(articleUrl)}
+                        onClick={() => {
+                          if (videoEngine === VideoEngine.VEO_AI) {
+                            handleGenerateVeoVideo(articleUrl);
+                          } else {
+                            handleGenerateReel(articleUrl);
+                          }
+                        }}
                         disabled={state.isLoading || (!articleUrl.trim() && !selectedArticle)}
                         className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95 shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-1.5 cursor-pointer font-sans"
                       >
-                        <span>⚡</span>
-                        <span>VIDEO YARATISH</span>
+                        <span>{videoEngine === VideoEngine.VEO_AI ? '🎬' : '⚡'}</span>
+                        <span>{videoEngine === VideoEngine.VEO_AI ? 'VEO VIDEO YARATISH' : 'VIDEO YARATISH'}</span>
                       </button>
                     </div>
                   </div>
@@ -1344,12 +1639,18 @@ const App: React.FC = () => {
                         ✕ Yopish
                       </button>
                       <button
-                        onClick={() => handleGenerateReel()}
+                        onClick={() => {
+                          if (videoEngine === VideoEngine.VEO_AI) {
+                            handleGenerateVeoVideo(selectedArticle?.title || articleUrl);
+                          } else {
+                            handleGenerateReel();
+                          }
+                        }}
                         disabled={state.isLoading}
                         className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95 shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
                       >
-                        <span>⚡</span>
-                        <span>Video yaratish</span>
+                        <span>{videoEngine === VideoEngine.VEO_AI ? '🎬' : '⚡'}</span>
+                        <span>{videoEngine === VideoEngine.VEO_AI ? 'Veo Video Yaratish' : 'Video yaratish'}</span>
                       </button>
                     </div>
                   </div>
@@ -1513,12 +1814,18 @@ const App: React.FC = () => {
                       )}
                     </span>
                     <button
-                      onClick={handleGenerateFromText}
+                      onClick={() => {
+                        if (videoEngine === VideoEngine.VEO_AI) {
+                          handleGenerateVeoVideo(rawTextTitle, rawTextInput);
+                        } else {
+                          handleGenerateFromText();
+                        }
+                      }}
                       disabled={state.isLoading || !rawTextInput.trim()}
                       className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95 shadow-md shadow-emerald-500/20 flex items-center gap-1 cursor-pointer font-sans"
                     >
-                      <span>⚡</span>
-                      <span>VIDEO YARATISH</span>
+                      <span>{videoEngine === VideoEngine.VEO_AI ? '🎬' : '⚡'}</span>
+                      <span>{videoEngine === VideoEngine.VEO_AI ? 'VEO VIDEO' : 'VIDEO YARATISH'}</span>
                     </button>
                   </div>
                 </div>
@@ -2312,9 +2619,19 @@ const App: React.FC = () => {
             {/* GENERATE ACTION BUTTON */}
             {activeTab === 'ai_generator' ? (
               <button
-                onClick={() => handleGenerateReel()}
+                onClick={() => {
+                  if (videoEngine === VideoEngine.VEO_AI) {
+                    handleGenerateVeoVideo(selectedArticle?.title || articleUrl);
+                  } else {
+                    handleGenerateReel();
+                  }
+                }}
                 disabled={state.isLoading || (!selectedArticle && !articleUrl.trim())}
-                className="w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600 hover:from-emerald-400 hover:to-green-500 disabled:opacity-50 text-slate-950 font-black py-4 px-6 rounded-2xl shadow-xl shadow-emerald-500/20 text-sm uppercase tracking-wider transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/40"
+                className={`w-full font-black py-4 px-6 rounded-2xl shadow-xl text-sm uppercase tracking-wider transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer border ${
+                  videoEngine === VideoEngine.VEO_AI
+                    ? 'bg-gradient-to-r from-purple-700 via-emerald-600 to-teal-600 hover:from-purple-600 hover:to-teal-500 text-white shadow-purple-900/30 border-purple-400/40'
+                    : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-emerald-500/20 border-emerald-400/40'
+                } disabled:opacity-50`}
               >
                 {state.isLoading ? (
                   <div className="flex items-center gap-2">
@@ -2323,17 +2640,29 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span>🌿</span>
-                    <span>JONGIYOH REELNI YARATISH</span>
-                    <span className="text-xs bg-slate-950/20 px-2 py-0.5 rounded-full font-mono font-normal">YMYL Xavfsiz • 6-8 kadr</span>
+                    <span>{videoEngine === VideoEngine.VEO_AI ? '🎬' : '🌿'}</span>
+                    <span>{videoEngine === VideoEngine.VEO_AI ? 'GOOGLE VEO REELNI YARATISH' : 'JONGIYOH REELNI YARATISH'}</span>
+                    <span className="text-xs bg-slate-950/20 px-2 py-0.5 rounded-full font-mono font-normal">
+                      {videoEngine === VideoEngine.VEO_AI ? "Vertex AI • Kinematik" : "YMYL Xavfsiz • 6-8 kadr"}
+                    </span>
                   </div>
                 )}
               </button>
             ) : activeTab === 'text_to_video' ? (
               <button
-                onClick={handleGenerateFromText}
+                onClick={() => {
+                  if (videoEngine === VideoEngine.VEO_AI) {
+                    handleGenerateVeoVideo(rawTextTitle, rawTextInput);
+                  } else {
+                    handleGenerateFromText();
+                  }
+                }}
                 disabled={state.isLoading || !rawTextInput.trim()}
-                className="w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600 hover:from-emerald-400 hover:to-green-500 disabled:opacity-50 text-slate-950 font-black py-4 px-6 rounded-2xl shadow-xl shadow-emerald-500/20 text-sm uppercase tracking-wider transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/40"
+                className={`w-full font-black py-4 px-6 rounded-2xl shadow-xl text-sm uppercase tracking-wider transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer border ${
+                  videoEngine === VideoEngine.VEO_AI
+                    ? 'bg-gradient-to-r from-purple-700 via-emerald-600 to-teal-600 hover:from-purple-600 hover:to-teal-500 text-white shadow-purple-900/30 border-purple-400/40'
+                    : 'bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600 hover:from-emerald-400 hover:to-green-500 text-slate-950 shadow-emerald-500/20 border-emerald-400/40'
+                } disabled:opacity-50`}
               >
                 {state.isLoading ? (
                   <div className="flex items-center gap-2">
@@ -2342,10 +2671,12 @@ const App: React.FC = () => {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span>✍️</span>
-                    <span>MATNDAN VIDEO YARATISH</span>
+                    <span>{videoEngine === VideoEngine.VEO_AI ? '🎬' : '✍️'}</span>
+                    <span>{videoEngine === VideoEngine.VEO_AI ? 'MATNDAN GOOGLE VEO YARATISH' : 'MATNDAN VIDEO YARATISH'}</span>
                     <span className="text-xs bg-slate-950/20 px-2 py-0.5 rounded-full font-mono font-normal">
-                      {targetSceneCount > 0 ? `${targetSceneCount} kadr` : 'Avto 4-7 kadr'} • Gemini TTS
+                      {videoEngine === VideoEngine.VEO_AI 
+                        ? 'Veo 3.1 & Omni • Kinematik' 
+                        : (targetSceneCount > 0 ? `${targetSceneCount} kadr` : 'Avto 4-7 kadr') + ' • Gemini TTS'}
                     </span>
                   </div>
                 )}
@@ -2412,6 +2743,7 @@ const App: React.FC = () => {
                 recipeCard={recipeCardData}
                 showRecipeCard={showRecipeCard}
                 recipeCardTiming={recipeCardTiming}
+                veoVideoUrl={state.videoData.veoVideoUrl}
               />
             ) : (
               <div className="w-[300px] h-[533px] rounded-2xl border-2 border-dashed border-emerald-900 bg-[#041d15] flex flex-col items-center justify-center p-6 text-center text-emerald-500 space-y-3">
@@ -2761,6 +3093,105 @@ const App: React.FC = () => {
               >
                 Saqlash & AI Ovozni qayta yozish
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* VEO LIVE PROGRESS MODAL */}
+      {showVeoModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#06241b] border border-emerald-700/80 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-emerald-900 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-300 flex items-center justify-center text-lg font-black border border-purple-500/40">
+                  🎬
+                </div>
+                <div>
+                  <h3 className="font-black text-white text-sm">Google Veo 3.1 & Omni Studio</h3>
+                  <p className="text-[10px] text-emerald-400 font-mono">Vertex AI • gen-lang-client-0604912271</p>
+                </div>
+              </div>
+              <span className="text-xs font-black px-2.5 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                {veoModel === 'omni' ? 'Gemini Omni' : 'Veo 3.1 Fast'}
+              </span>
+            </div>
+
+            {/* Progress bar */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-bold">
+                <span className="text-emerald-300">
+                  {veoJobState?.message || state.loadingStep || "Video render qilinmoqda..."}
+                </span>
+                <span className="text-emerald-400 font-mono font-black">
+                  {veoJobState?.progress ?? 10}%
+                </span>
+              </div>
+              <div className="w-full bg-[#041d15] h-3 rounded-full overflow-hidden border border-emerald-900">
+                <div 
+                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-green-400 h-full transition-all duration-500"
+                  style={{ width: `${Math.max(5, veoJobState?.progress ?? 10)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* 4 Pipeline Milestones */}
+            <div className="grid grid-cols-4 gap-2 text-center text-[10px]">
+              <div className={`p-2 rounded-xl border ${ (veoJobState?.progress ?? 10) >= 15 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200' : 'bg-[#041d15] border-emerald-900 text-emerald-600'}`}>
+                <div className="font-bold">1. Ssenariy</div>
+                <div className="text-[9px] mt-0.5">11-14 so'z</div>
+              </div>
+              <div className={`p-2 rounded-xl border ${ (veoJobState?.progress ?? 10) >= 30 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200' : 'bg-[#041d15] border-emerald-900 text-emerald-600'}`}>
+                <div className="font-bold">2. Veo Render</div>
+                <div className="text-[9px] mt-0.5">Vertex AI</div>
+              </div>
+              <div className={`p-2 rounded-xl border ${ (veoJobState?.progress ?? 10) >= 80 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200' : 'bg-[#041d15] border-emerald-900 text-emerald-600'}`}>
+                <div className="font-bold">3. Auto-Trim</div>
+                <div className="text-[9px] mt-0.5">0.6s jimlik</div>
+              </div>
+              <div className={`p-2 rounded-xl border ${ (veoJobState?.progress ?? 10) >= 95 ? 'bg-emerald-950/80 border-emerald-500 text-emerald-200' : 'bg-[#041d15] border-emerald-900 text-emerald-600'}`}>
+                <div className="font-bold">4. Tayyor</div>
+                <div className="text-[9px] mt-0.5">MP4 video</div>
+              </div>
+            </div>
+
+            {/* Completed clips preview if any */}
+            {veoJobState?.clips && veoJobState.clips.length > 0 && (
+              <div className="space-y-1.5 pt-1">
+                <span className="text-[10px] font-bold text-emerald-400 uppercase">
+                  Tayyor bo'lgan kadrlar ({veoJobState.clips.length} ta):
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {veoJobState.clips.map((c, i) => (
+                    <div key={i} className="w-16 h-20 bg-black/60 rounded-lg overflow-hidden border border-emerald-800 shrink-0 relative">
+                      <video src={c.url} className="w-full h-full object-cover" muted autoPlay loop playsInline />
+                      <span className="absolute bottom-1 right-1 bg-black/80 text-[8px] font-bold px-1 rounded text-emerald-300">
+                        #{i + 1}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Credit & time notice */}
+            <div className="bg-[#041d15] p-3 rounded-xl border border-emerald-900/80 text-[11px] text-emerald-300/90 leading-relaxed flex items-start gap-2">
+              <span className="text-base">💡</span>
+              <span>
+                Generatsiya taxminan <strong>3–5 daqiqa</strong> davom etadi. Google Cloud $300 bepul kreditidan hisoblanadi (~$8.5). Jarayon tugaguncha sahifani yopmang.
+              </span>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-emerald-900">
+              <button
+                onClick={handleCancelVeoGeneration}
+                className="text-xs text-red-400 hover:text-red-300 font-bold px-3 py-1.5 rounded-lg hover:bg-red-950/40 transition cursor-pointer"
+              >
+                Bekor qilish
+              </button>
+              <span className="text-[10px] text-emerald-500 font-mono">
+                {veoJobState?.id ? `Job: ${veoJobState.id.slice(0, 8)}...` : 'Tayyorlanmoqda...'}
+              </span>
             </div>
           </div>
         </div>

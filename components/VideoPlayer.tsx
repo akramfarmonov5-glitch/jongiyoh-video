@@ -34,6 +34,7 @@ interface VideoPlayerProps {
   recipeCard?: RecipeCardData;
   showRecipeCard?: boolean;
   recipeCardTiming?: 'both' | 'recipe_scene' | 'video_end';
+  veoVideoUrl?: string;
 }
 
 interface WordTiming {
@@ -303,8 +304,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   showEmojiAccents = true,
   recipeCard,
   showRecipeCard = true,
-  recipeCardTiming = 'both'
+  recipeCardTiming = 'both',
+  veoVideoUrl
 }) => {
+  const [playerMode, setPlayerMode] = useState<'canvas' | 'veo'>(veoVideoUrl ? 'veo' : 'canvas');
+
+  useEffect(() => {
+    if (veoVideoUrl) {
+      setPlayerMode('veo');
+    }
+  }, [veoVideoUrl]);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   
@@ -1746,49 +1756,103 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
   return (
     <div className="flex flex-col items-center w-full">
-      <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-slate-700 bg-black ring-4 ring-amber-500/30 transition-all duration-300">
-        <canvas 
-          ref={canvasRef} 
-          width={WIDTH} 
-          height={HEIGHT} 
-          className={`${getCanvasAspectClass()} bg-black`}
-        />
-        <div className="absolute bottom-0 w-full p-4 flex justify-between items-center bg-gradient-to-t from-black/85 via-black/40 to-transparent">
-          <button 
-            onClick={togglePlay}
-            disabled={downloadProgress !== null}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold p-3.5 rounded-full transition disabled:opacity-50 active:scale-95 shadow-lg flex items-center justify-center"
+      {/* Veo vs Canvas Mode Switcher */}
+      {veoVideoUrl && (
+        <div className="flex bg-[#041d15] p-1 rounded-xl border border-purple-500/40 mb-3.5 gap-1.5 shadow-lg">
+          <button
+            onClick={() => setPlayerMode('veo')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+              playerMode === 'veo' 
+                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md shadow-purple-500/25' 
+                : 'text-purple-300 hover:text-white hover:bg-purple-950/60'
+            }`}
           >
-            {isPlaying ? (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" className="w-5 h-5">
-                <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
-              </svg>
-            ) : (
-              <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" className="w-5 h-5 translate-x-0.5">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            )}
+            <span>🎬</span>
+            <span>Google Veo Video (MP4)</span>
           </button>
+          <button
+            onClick={() => setPlayerMode('canvas')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-black transition cursor-pointer flex items-center gap-1.5 ${
+              playerMode === 'canvas' 
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-md shadow-emerald-500/25' 
+                : 'text-emerald-300 hover:text-white hover:bg-emerald-950/60'
+            }`}
+          >
+            <span>🎨</span>
+            <span>2D Canvas Motion</span>
+          </button>
+        </div>
+      )}
 
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleJumpToRecipe}
-              className="bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 backdrop-blur-md hover:border-emerald-400 shadow-md cursor-pointer"
-              title="Damlash retsepti va doza infografikasiga o'tish"
+      {playerMode === 'veo' && veoVideoUrl ? (
+        <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-purple-500/50 bg-black ring-4 ring-purple-500/20 transition-all duration-300 flex flex-col items-center w-full max-w-[340px]">
+          <video
+            src={veoVideoUrl}
+            controls
+            autoPlay
+            playsInline
+            className={`${getCanvasAspectClass()} bg-black object-cover w-full`}
+          />
+          <div className="w-full p-3 bg-[#06241b] border-t border-purple-900/60 flex items-center justify-between">
+            <span className="text-xs text-purple-300 font-black flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+              Veo 3.1 & Omni
+            </span>
+            <a
+              href={veoVideoUrl}
+              download={`veo-${generateSeoSlug(topic || 'video')}.mp4`}
+              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow cursor-pointer"
             >
-              🫖 Retsept Kadriga
-            </button>
-            {onEditScript && (
-              <button
-                onClick={onEditScript}
-                className="bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 backdrop-blur-md hover:border-amber-400 shadow-md cursor-pointer"
-              >
-                ✏️ Matn
-              </button>
-            )}
+              <span>📥</span>
+              <span>MP4 Yuklab Olish</span>
+            </a>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-slate-700 bg-black ring-4 ring-amber-500/30 transition-all duration-300">
+          <canvas 
+            ref={canvasRef} 
+            width={WIDTH} 
+            height={HEIGHT} 
+            className={`${getCanvasAspectClass()} bg-black`}
+          />
+          <div className="absolute bottom-0 w-full p-4 flex justify-between items-center bg-gradient-to-t from-black/85 via-black/40 to-transparent">
+            <button 
+              onClick={togglePlay}
+              disabled={downloadProgress !== null}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold p-3.5 rounded-full transition disabled:opacity-50 active:scale-95 shadow-lg flex items-center justify-center"
+            >
+              {isPlaying ? (
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" className="w-5 h-5">
+                  <path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" />
+                </svg>
+              ) : (
+                <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" className="w-5 h-5 translate-x-0.5">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              )}
+            </button>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleJumpToRecipe}
+                className="bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 backdrop-blur-md hover:border-emerald-400 shadow-md cursor-pointer"
+                title="Damlash retsepti va doza infografikasiga o'tish"
+              >
+                🫖 Retsept Kadriga
+              </button>
+              {onEditScript && (
+                <button
+                  onClick={onEditScript}
+                  className="bg-slate-900/80 hover:bg-slate-800 text-amber-300 border border-amber-500/30 px-3 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 backdrop-blur-md hover:border-amber-400 shadow-md cursor-pointer"
+                >
+                  ✏️ Matn
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Scrub bar & Time controls */}
       <div className="mt-4 w-full max-w-[340px] bg-slate-900/80 border border-slate-800 rounded-2xl p-3.5 space-y-2 backdrop-blur-md">

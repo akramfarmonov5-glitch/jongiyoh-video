@@ -1266,10 +1266,11 @@ ${cleanInput}
 
 QAT'IY QOIDALAR (BU QOIDALAR BUZILSA VIDEO SIFATSIZ CHIQADI):
 1. Aniq ${targetClips} ta kadr yarating (Kadr 1 dan Kadr ${targetClips} gacha).
-2. HAR BIR KADR OVOZ MATNI (narration) QAT'IY 11 TAdan 14 TAGACHA O'ZBEKCHA SO'Z BO'LSIN!
-   - 11 tadan kam bo'lsa: model bo'sh qolgan vaqtda so'zni takrorlaydi yoki 4 soniya jim tirjayib turadi!
-   - 14 tadan ko'p bo'lsa: 10 soniyaga sig'may, gap o'rtasida kesilib qoladi!
-   - Har bir gap tugallangan ma'noga ega bo'lsin.
+2. HAR BIR KADR OVOZ MATNI (narration) QAT'IY 13 TAdan 16 TAGACHA O'ZBEKCHA SO'Z BO'LSIN!
+   - 13 tadan kam bo'lsa: 10 soniyalik kadr oxirida 2-3 soniya o'lik jimlik va bo'shliq qolib ketadi!
+   - 16 tadan ko'p bo'lsa: 10 soniyaga sig'may, gap o'rtasida kesilib qolishi mumkin.
+   - So'zlar ravon, aniq talaffuz qilinadigan adabiy o'zbek tilida bo'lsin, duduqlanish yoki tushunarsiz so'zlar bo'lmasin.
+   - Har bir gap mustaqil tugallangan ma'noga ega bo'lsin.
 3. KADRLARNING XILMA-XIL REJISSURASI (Bitta yigit barcha kadrda qotib turishi TAQIQLANGAN):
    - 1-kadr (Hook): O'rta plan (Medium shot) — samimiy qahramon tabiat fonida jilmayib muammoni aytadi.
    - 2-kadr (Sabab/Modda): Ekstremal makro (Extreme macro) — qo'llarda quritilgan dorivor giyoh barglari va shudring.

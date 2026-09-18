@@ -337,6 +337,57 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [isGeneratingCover, setIsGeneratingCover] = useState(false);
   const [isDownloadingRecipeCard, setIsDownloadingRecipeCard] = useState(false);
 
+  // 🎬 Veo Video Mode enhancements (Subtitles & Ambient Audio)
+  const [veoCurrentTime, setVeoCurrentTime] = useState<number>(0);
+  const [veoDuration, setVeoDuration] = useState<number>(0);
+  const [showVeoSubtitles, setShowVeoSubtitles] = useState<boolean>(true);
+  const [veoBgMusicActive, setVeoBgMusicActive] = useState<boolean>(true);
+  const veoMusicRef = useRef<{ stop: () => void } | null>(null);
+  const veoAudioCtxRef = useRef<AudioContext | null>(null);
+
+  const activeVeoScene = useMemo(() => {
+    if (!scenes || scenes.length === 0) return null;
+    const totalD = veoDuration > 0 ? veoDuration : 48.4;
+    const sceneD = totalD / scenes.length;
+    const idx = Math.min(scenes.length - 1, Math.max(0, Math.floor(veoCurrentTime / sceneD)));
+    return scenes[idx];
+  }, [scenes, veoCurrentTime, veoDuration]);
+
+  const handleVeoPlay = () => {
+    if (veoBgMusicActive && musicGenre && musicGenre !== BackgroundMusicGenre.NONE) {
+      try {
+        if (!veoAudioCtxRef.current || veoAudioCtxRef.current.state === 'closed') {
+          const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+          veoAudioCtxRef.current = new AudioContextClass();
+        }
+        if (veoAudioCtxRef.current.state === 'suspended') {
+          veoAudioCtxRef.current.resume();
+        }
+        if (!veoMusicRef.current) {
+          veoMusicRef.current = createBackgroundMusic(veoAudioCtxRef.current, musicGenre, musicVolume);
+        }
+      } catch (e) {
+        console.warn("Failed to start Veo background music:", e);
+      }
+    }
+  };
+
+  const handleVeoPause = () => {
+    if (veoMusicRef.current) {
+      veoMusicRef.current.stop();
+      veoMusicRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (veoMusicRef.current) {
+        veoMusicRef.current.stop();
+        veoMusicRef.current = null;
+      }
+    };
+  }, []);
+
   // Compute 100% complete, authentic RecipeCardData with robust fallback
   const effectiveRecipeCard: RecipeCardData = useMemo(() => {
     if (recipeCard && (recipeCard.dosage || recipeCard.water)) {
@@ -1786,25 +1837,84 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
       {playerMode === 'veo' && veoVideoUrl ? (
         <div className="relative rounded-2xl overflow-hidden shadow-2xl border border-purple-500/50 bg-black ring-4 ring-purple-500/20 transition-all duration-300 flex flex-col items-center w-full max-w-[340px]">
-          <video
-            src={veoVideoUrl}
-            controls
-            autoPlay
-            playsInline
-            className={`${getCanvasAspectClass()} bg-black object-cover w-full`}
-          />
-          <div className="w-full p-3 bg-[#06241b] border-t border-purple-900/60 flex items-center justify-between">
-            <span className="text-xs text-purple-300 font-black flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
-              Veo 3.1 & Omni
-            </span>
+          <div className="relative w-full overflow-hidden">
+            <video
+              src={veoVideoUrl}
+              controls
+              autoPlay
+              playsInline
+              onPlay={handleVeoPlay}
+              onPause={handleVeoPause}
+              onEnded={handleVeoPause}
+              onTimeUpdate={(e) => setVeoCurrentTime(e.currentTarget.currentTime)}
+              onLoadedMetadata={(e) => setVeoDuration(e.currentTarget.duration)}
+              className={`${getCanvasAspectClass()} bg-black object-cover w-full`}
+            />
+
+            {/* 💬 Zumrad Karaoke / Subtitle Overlay for Veo */}
+            {showVeoSubtitles && activeVeoScene && (
+              <div className="absolute bottom-16 left-3 right-3 pointer-events-none flex flex-col items-center text-center transition-all duration-300 z-20">
+                {/* Category / Warning Badge */}
+                <div className={`px-2.5 py-0.5 rounded-full text-[10px] font-black tracking-wider uppercase mb-1.5 shadow-lg backdrop-blur-md ${
+                  activeVeoScene.type === 'warning'
+                    ? 'bg-rose-600/90 text-white border border-rose-400/50 shadow-rose-900/50'
+                    : 'bg-emerald-600/90 text-white border border-emerald-400/50 shadow-emerald-900/50'
+                }`}>
+                  {activeVeoScene.headline || (activeVeoScene.type === 'warning' ? "⚠️ QARSHI KO'RSATMA" : "🌿 JONGIYOH")}
+                </div>
+                {/* Text Box */}
+                <div className="bg-black/85 backdrop-blur-md px-3.5 py-2 rounded-xl border border-emerald-500/30 max-w-[95%] shadow-2xl">
+                  <p className="text-white text-xs sm:text-sm font-black leading-snug tracking-wide drop-shadow-md">
+                    {activeVeoScene.narration}
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Quick Controls & Download Bar */}
+          <div className="w-full p-2.5 bg-[#06241b] border-t border-purple-900/60 flex flex-col gap-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-purple-300 font-black flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse"></span>
+                Veo 3.1 & Omni
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setShowVeoSubtitles(!showVeoSubtitles)}
+                  className={`px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                    showVeoSubtitles ? 'bg-emerald-500 text-slate-950 shadow-sm' : 'bg-slate-800 text-slate-400'
+                  }`}
+                  title="Subtitrlarni yoqish / o'chirish"
+                >
+                  <span>💬 Subtitr</span>
+                </button>
+                <button
+                  onClick={() => {
+                    const next = !veoBgMusicActive;
+                    setVeoBgMusicActive(next);
+                    if (!next && veoMusicRef.current) {
+                      veoMusicRef.current.stop();
+                      veoMusicRef.current = null;
+                    }
+                  }}
+                  className={`px-2 py-1 rounded text-[11px] font-bold transition flex items-center gap-1 cursor-pointer ${
+                    veoBgMusicActive ? 'bg-indigo-500 text-white shadow-sm' : 'bg-slate-800 text-slate-400'
+                  }`}
+                  title="Fito-musiqani yoqish / o'chirish"
+                >
+                  <span>🎵 Musiqa</span>
+                </button>
+              </div>
+            </div>
+
             <a
               href={veoVideoUrl}
               download={`veo-${generateSeoSlug(topic || 'video')}.mp4`}
-              className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition flex items-center gap-1 shadow cursor-pointer"
+              className="w-full bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:opacity-90 text-white text-xs font-black py-2 rounded-lg transition flex items-center justify-center gap-1.5 shadow cursor-pointer text-center"
             >
               <span>📥</span>
-              <span>MP4 Yuklab Olish</span>
+              <span>Yuqori Sifatli MP4 Yuklab Olish (1080p)</span>
             </a>
           </div>
         </div>

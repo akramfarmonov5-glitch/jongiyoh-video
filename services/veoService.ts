@@ -229,8 +229,8 @@ export const mapReelScenesToVeoScenes = (scenes: ReelScene[], topic: string): Ve
     const narrationText = scene.narration.replace(/["]/g, "'");
     
     // Strict prompt formulation adhering to QOIDALAR.md:
-    // Continuous 10s action, camera direction, strictly NO text/packaging on screen, speech instruction
-    const prompt = `${dir} Subject: authentic herbal wellness related to ${topic.slice(0, 40)}. While continuous movement occurs, the speaker naturally says in fluent Uzbek: "${narrationText}". High resolution, photorealistic 8k, authentic documentary realism, strictly NO text on screen, NO artificial glowing neon, NO split screen.`;
+    // Continuous 10s action, camera direction, strictly NO text/packaging on screen, single consistent voice persona
+    const prompt = `${dir} Subject: authentic herbal wellness related to ${topic.slice(0, 40)}. Consistent single warm, trustworthy male Uzbek herbalist voice throughout the entire video. The speaker naturally and fluently says in crystal-clear, articulate Uzbek without stuttering or repeating words: "${narrationText}". High resolution, photorealistic 8k, authentic documentary realism, strictly NO text on screen, NO artificial glowing neon, NO split screen.`;
 
     return {
       prompt,

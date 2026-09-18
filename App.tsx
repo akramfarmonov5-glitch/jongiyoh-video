@@ -22,6 +22,7 @@ import {
 import { 
   fetchAndExtractArticle, 
   generateJongiyohReelScript, 
+  generateScriptFromText,
   generateAudio, 
   generateSceneImagesWithStrategy,
   extractUnsplashPhotoId, 
@@ -42,15 +43,59 @@ import VideoPlayer from './components/VideoPlayer';
 
 const STORAGE_KEY = 'jongiyoh_reels_saved_projects_v1';
 
-const App: React.FC = () => {
-  // Active Tab: 'ai_generator' | 'custom_media'
-  const [activeTab, setActiveTab] = useState<'ai_generator' | 'custom_media'>('ai_generator');
+export const TEXT_TEMPLATES = [
+  {
+    label: "🌿 Qirqbo'g'in va bo'g'imlar",
+    title: "Qirqbo'g'in o'ti: Bo'g'imlar va tog'ay salomatligi",
+    text: `Dala qirqbo'g'in o'ti inson bo'g'imlari va suyaklari uchun tabiatning eng kuchli ne'matlaridan biridir.
+Uning tarkibidagi tabiiy biologik kremniy moddasi sinovial suyuqlik va tog'ay to'qimasini oziqlantirishga yordam beradi.
+Tayyorlash juda oson: 1 choy qoshiq quritilgan giyohni 250 millilitr qaynoq suvda 30 daqiqa damlang. Kuniga yarim stakandan ovqatdan oldin iliq holda ichiladi.
+Diqqat, qat'iy ogohlantirish: o'tkir buyrak kasalliklari, buyrak toshi va homiladorlik davrida qabul qilish mutlaqo taqiqlanadi!
+Damlama 3 hafta davomida qabul qilinib, so'ngra 10 kun tanaffus qilinishi shart. O'zingizga mos dozani aniqlash uchun Jongiyoh bot orqali hisoblang.`
+  },
+  {
+    label: "🍋 Ertalabki iliq suv",
+    title: "Ertalabki limonli suv: Quvvat va organizmni tozalash",
+    text: `Har kuni ertalab och qoringa bir stakan iliq limonli suv ichish organizmni uyg'otishning eng oddiy va samarali usulidir.
+Limon tarkibidagi C vitamini va organik kislotalar jigar faoliyatini faollashtiradi va ovqat hazm qilish tizimini tozalaydi.
+Shuningdek, u moddalar almashinuvini tezlashtirib, kun davomida tetiklik va yengillik bag'ishlaydi.
+Biroq oshqozon yarasi yoki yuqori kislotalilik bilan og'rigan insonlar ehtiyot bo'lishlari lozim.
+Sog'lom turmush tarzi uchun ushbu videoni saqlab oling va yaqinlaringizga yuboring!`
+  },
+  {
+    label: "🧘 Ibn Sino: 4 Ustun",
+    title: "Abu Ali ibn Sino: Sog'lom uzoq umr ko'rish 4 ustuni",
+    text: `Buyuk tabib Abu Ali ibn Sino o'zining "Tib qonunlari" asarida inson salomatligi to'rtta asosiy ustunga tayanishini ta'kidlagan.
+Birinchi ustun — doimiy jismoniy harakat va badantarbiya, ikkinchisi — toza havo va me'yordagi to'g'ri oziqlanishdir.
+Uchinchi ustun — sifatli uyqu va ruhiy xotirjamlik, to'rtinchisi esa organizmni zararli moddalardan tabiiy giyohlar bilan tozalashdir.
+Ibn Sino aytganidek: "Harakatda bo'lgan odamga ko'p dori-darmonning keragi yo'q".
+Ushbu donishmandlik o'gitlarini yaqinlaringiz bilan ulashing va sahifamizga obuna bo'ling!`
+  },
+  {
+    label: "🍵 Tog'rayhon va uyqu",
+    title: "Tog'rayhon choyi: Asablar xotirjamligi va sog'lom uyqu",
+    text: `Tog'rayhon o'simligi qadimdan asab tizimini tinchlantirish va uyqu sifatini yaxshilashda tengsiz hisoblanadi.
+Kechki payt damlangan bir piyola xushbo'y tog'rayhon choyi kundalik stress va bosh og'rig'ini yengillashtiradi.
+Bir choy qoshiq giyohni bir stakan qaynoq suvda 15 daqiqa tindirib, bir qoshiq tabiiy asal bilan ichish tavsiya etiladi.
+Homilador ayollarga bachadon tonusini oshirishi sababli tog'rayhon ichish man etiladi.
+Salomatlik va tabiiy tabobat sirlari uchun Jongiyoh sahifasini kuzatib boring!`
+  }
+];
 
-  // Main Input State (Jongiyoh Tab)
+const App: React.FC = () => {
+  // Active Tab: 'ai_generator' | 'text_to_video' | 'custom_media'
+  const [activeTab, setActiveTab] = useState<'ai_generator' | 'text_to_video' | 'custom_media'>('ai_generator');
+
+  // Main Input State (Jongiyoh Link / Topic Tab)
   const [articleUrl, setArticleUrl] = useState('');
   const [selectedArticle, setSelectedArticle] = useState<AIArticle | null>(null);
   const [isExtractingArticle, setIsExtractingArticle] = useState(false);
   const [channelHandle, setChannelHandle] = useState('@jongiyoh');
+
+  // Text to Video State (Matndan Video Tab)
+  const [rawTextInput, setRawTextInput] = useState('');
+  const [rawTextTitle, setRawTextTitle] = useState('');
+  const [targetSceneCount, setTargetSceneCount] = useState<number>(0);
   
   // Custom Media State (Custom Media Tab)
   const [customImages, setCustomImages] = useState<CustomImageItem[]>([]);
@@ -358,6 +403,108 @@ const App: React.FC = () => {
         isLoading: false,
         loadingStep: '',
         error: err?.message || "Video yaratishda xatolik yuz berdi. Iltimos qayta urinib ko'ring.",
+        videoData: null
+      });
+    }
+  };
+
+  // MAIN GENERATION PIPELINE (Text-to-Video Tab)
+  const handleGenerateFromText = async () => {
+    const trimmed = rawTextInput.trim();
+    if (!trimmed) {
+      setState(prev => ({ 
+        ...prev, 
+        error: "Iltimos, video yaratish uchun matn maydoniga biror matn yozing yoki yuqoridagi tayyor namunalardan birini tanlang!" 
+      }));
+      return;
+    }
+
+    setState({
+      isLoading: true,
+      loadingStep: "1/4: Matn tahlil qilinib, 9:16 vertikal kadrlar ssenariysi tuzilmoqda...",
+      error: null,
+      videoData: null
+    });
+
+    try {
+      // Step 1: Script & Scene generation from user text
+      const scriptResult = await generateScriptFromText(trimmed, {
+        title: rawTextTitle.trim() || undefined,
+        style: reelStyle,
+        genre: visualGenre,
+        modelEngine,
+        targetSceneCount
+      });
+
+      // Step 2: Gemini TTS Audio
+      setState(prev => ({
+        ...prev,
+        loadingStep: "2/4: O'zbekcha professional diktor nutqi yozilmoqda (Gemini 3.1 Flash TTS)..."
+      }));
+      const audioBase64 = await generateAudio(scriptResult.fullScript, voice);
+
+      // Step 3: Visual Generation (AI or Real Photos)
+      setState(prev => ({
+        ...prev,
+        loadingStep: `3/4: Kadrlarga mos tasvirlar tayyorlanmoqda (${visualStrategy === VisualGenerationStrategy.HYBRID ? 'Gibrid: 4 AI + 3 Unsplash' : visualStrategy === VisualGenerationStrategy.ALL_AI ? '100% AI' : 'Unsplash fotosuratlari'})...`
+      }));
+
+      const { images: generatedImages, updatedScenes } = await generateSceneImagesWithStrategy(
+        scriptResult.scenes,
+        aspectRatio,
+        visualStrategy,
+        scriptResult.articleTitle || rawTextTitle || 'dorivor giyohlar',
+        (completed, total, mode) => {
+          setState(prev => ({
+            ...prev,
+            loadingStep: `3/4: Tasvirlar tayyorlanmoqda (${completed} / ${total}) — ${mode === 'ai' ? '🌿 AI chizmoqda' : '📸 Botanik foto yuklanmoqda'}...`
+          }));
+        },
+        imageModel
+      );
+
+      // Step 4: Sync
+      setState(prev => ({
+        ...prev,
+        loadingStep: "4/4: Subtitrlar va sokin fon musiqasi sinxronlanmoqda..."
+      }));
+
+      const newVideoData: VideoData = {
+        topic: scriptResult.articleTitle,
+        articleTitle: scriptResult.articleTitle,
+        hook: scriptResult.hook,
+        fullScript: scriptResult.fullScript,
+        script: scriptResult.scriptSegments,
+        scriptSegments: scriptResult.scriptSegments,
+        scenes: updatedScenes,
+        images: generatedImages,
+        imagePrompts: scriptResult.imagePrompts,
+        audioBase64,
+        caption: scriptResult.caption,
+        instagramCaption: scriptResult.caption,
+        hashtags: scriptResult.hashtags,
+        coverHeadline: scriptResult.coverHeadline,
+        coverSubtitle: scriptResult.coverSubtitle,
+        reelStyle,
+        visualGenre,
+        recipeCard: scriptResult.recipeCard
+      };
+
+      setState({
+        isLoading: false,
+        loadingStep: '',
+        error: null,
+        videoData: newVideoData
+      });
+
+      saveProjectToHistory(newVideoData);
+
+    } catch (err: any) {
+      console.error("Text-to-Video generation failed:", err);
+      setState({
+        isLoading: false,
+        loadingStep: '',
+        error: err?.message || "Matndan video yaratishda xatolik yuz berdi. Iltimos qayta urinib ko'ring.",
         videoData: null
       });
     }
@@ -987,29 +1134,41 @@ const App: React.FC = () => {
         <div className="lg:col-span-7 space-y-6">
           
           {/* TOP MODE TOGGLE TABS */}
-          <div className="bg-[#072a20] p-1.5 rounded-2xl border border-emerald-900/80 grid grid-cols-2 gap-1.5 shadow-lg">
+          <div className="bg-[#072a20] p-1.5 rounded-2xl border border-emerald-900/80 grid grid-cols-3 gap-1.5 shadow-lg">
             <button
               onClick={() => setActiveTab('ai_generator')}
-              className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer ${
+              className={`py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer ${
                 activeTab === 'ai_generator'
                   ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black shadow-md shadow-emerald-500/20'
                   : 'text-emerald-300 hover:text-white hover:bg-emerald-900/60'
               }`}
             >
               <span>🌿</span>
-              <span>Jongiyoh Fito Generator</span>
+              <span className="truncate">Havola / Giyoh</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('text_to_video')}
+              className={`py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                activeTab === 'text_to_video'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black shadow-md shadow-emerald-500/20'
+                  : 'text-emerald-300 hover:text-white hover:bg-emerald-900/60'
+              }`}
+            >
+              <span>✍️</span>
+              <span className="truncate">Matndan Video</span>
             </button>
             
             <button
               onClick={() => setActiveTab('custom_media')}
-              className={`py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-2 transition cursor-pointer ${
+              className={`py-2.5 px-3 rounded-xl text-xs font-black uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer ${
                 activeTab === 'custom_media'
                   ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-black shadow-md shadow-emerald-500/20'
                   : 'text-emerald-300 hover:text-white hover:bg-emerald-900/60'
               }`}
             >
               <span>📸</span>
-              <span>O'z Rasmlarim (10 tagacha) & MP3</span>
+              <span className="truncate">O'z Media & MP3</span>
             </button>
           </div>
 
@@ -1252,7 +1411,153 @@ const App: React.FC = () => {
             </div>
           )}
 
-          {/* TAB 2: CUSTOM MEDIA UPLOAD (1-10 IMAGES & MP3 AUDIO) */}
+          {/* TAB 2: TEXT-TO-VIDEO GENERATOR (MATNDAN VIDEO) */}
+          {activeTab === 'text_to_video' && (
+            <div className="space-y-6">
+              {/* Feature Intro Banner */}
+              <div className="bg-gradient-to-r from-emerald-950/70 via-[#072d22] to-[#06241b] border border-emerald-500/30 rounded-2xl p-4 flex items-start gap-3 shadow-lg">
+                <div className="p-2 rounded-xl bg-emerald-500/20 text-emerald-400 font-black text-lg">
+                  ✍️
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-xs font-black uppercase tracking-wider text-emerald-400">
+                    Ixtiyoriy Matndan Video Yaratish (Text to Video Studio)
+                  </h3>
+                  <p className="text-xs text-emerald-200/90 mt-1 leading-relaxed">
+                    Istalgan maqola, dorivor giyoh retsepti, hayotiy hikoya, she'r yoki tavsiyani kiriting. Gemini AI uni tahlil qilib, 9:16 vertikal kadrlar, O'zbekcha tabiiy diktor ovozi, kinematik tasvirlar va karaoke subtitrlar bilan to'liq video yasab beradi.
+                  </p>
+                </div>
+              </div>
+
+              {/* Main Input Card */}
+              <div className="bg-[#072a20]/90 border border-emerald-900/70 rounded-2xl p-5 shadow-xl space-y-4">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-wider text-emerald-200 flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-emerald-400 text-slate-950 flex items-center justify-center text-[10px] font-black">1</span>
+                    Matn va Sarlavhani Kiriting
+                  </label>
+                  <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    O'zbek / Rus / Ingliz
+                  </span>
+                </div>
+
+                {/* Optional Title and Scene Count */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                      Mavzu yoki Sarlavha (ixtiyoriy)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Masalan: Bo'g'imlar qisirlashi va qirqbo'g'in yoki Tonggi foydali odatlar..."
+                      value={rawTextTitle}
+                      onChange={(e) => setRawTextTitle(e.target.value)}
+                      className="w-full bg-[#041d15] border border-emerald-800/80 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-emerald-700 focus:outline-none focus:border-emerald-400 font-medium"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-emerald-300 block mb-1">
+                      Kadrlar soni
+                    </label>
+                    <select
+                      value={targetSceneCount}
+                      onChange={(e) => setTargetSceneCount(Number(e.target.value))}
+                      className="w-full bg-[#041d15] border border-emerald-800/80 rounded-xl px-3.5 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-emerald-400 cursor-pointer"
+                    >
+                      <option value={0}>Avtomatik (4-6 kadr)</option>
+                      <option value={3}>3 ta kadr (~15-20 sek)</option>
+                      <option value={5}>5 ta kadr (~30-40 sek)</option>
+                      <option value={7}>7 ta kadr (~50-60 sek)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Main Textarea */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-emerald-300">
+                      Asosiy Matn (Maqola, hikoya, retsept yoki tavsiya)
+                    </label>
+                    {rawTextInput && (
+                      <button
+                        onClick={() => { setRawTextInput(''); setRawTextTitle(''); }}
+                        className="text-[11px] text-emerald-500 hover:text-emerald-300 font-bold cursor-pointer"
+                      >
+                        ✕ Tozalash
+                      </button>
+                    )}
+                  </div>
+
+                  <textarea
+                    rows={7}
+                    placeholder="Bu yerga video qilmoqchi bo'lgan ixtiyoriy matningizni yozing yoki nusxalab joylang...&#10;&#10;Masalan: Dorivor giyohlarning inson tanasiga foydasi, to'g'ri damlash qoidalari, Abu Ali ibn Sino tavsiyalari, sog'lom turmush tarzi yoki qiziqarli hayotiy xulosa..."
+                    value={rawTextInput}
+                    onChange={(e) => setRawTextInput(e.target.value)}
+                    className="w-full bg-[#041d15] border border-emerald-800/80 rounded-xl p-3.5 text-xs text-white placeholder-emerald-700 focus:outline-none focus:border-emerald-400 font-sans leading-relaxed transition"
+                  />
+
+                  {/* Character & Word counter info */}
+                  <div className="flex items-center justify-between text-[11px] text-emerald-400/80 pt-0.5">
+                    <span>
+                      {rawTextInput.trim().length > 0 ? (
+                        <>
+                          📝 {rawTextInput.trim().length} belgi • {rawTextInput.trim().split(/\s+/).filter(Boolean).length} so'z 
+                          <span className="text-emerald-300 font-bold ml-1.5">
+                            (~{Math.max(12, Math.round(rawTextInput.trim().split(/\s+/).filter(Boolean).length / 2.2))} soniya nutq)
+                          </span>
+                        </>
+                      ) : (
+                        '💡 Istalgan uzunlikdagi matnni kiritishingiz mumkin.'
+                      )}
+                    </span>
+                    <button
+                      onClick={handleGenerateFromText}
+                      disabled={state.isLoading || !rawTextInput.trim()}
+                      className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-50 text-slate-950 font-black px-4 py-1.5 rounded-xl text-xs uppercase tracking-wider transition active:scale-95 shadow-md shadow-emerald-500/20 flex items-center gap-1 cursor-pointer font-sans"
+                    >
+                      <span>⚡</span>
+                      <span>VIDEO YARATISH</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Samples / Templates */}
+                <div className="space-y-1.5 pt-2 border-t border-emerald-900/60">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-bold text-emerald-200 flex items-center gap-1">
+                      <span>💡</span> 1-bosishda sinab ko'rish uchun tayyor matnlar:
+                    </span>
+                    <span className="text-emerald-500">Tanlang va darhol yarating</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {TEXT_TEMPLATES.map((tmpl, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => {
+                          setRawTextTitle(tmpl.title);
+                          setRawTextInput(tmpl.text);
+                        }}
+                        className="text-left bg-[#041d15] hover:bg-emerald-950/80 border border-emerald-800/70 hover:border-emerald-500/60 p-2.5 rounded-xl transition cursor-pointer group"
+                      >
+                        <div className="text-xs font-bold text-emerald-300 group-hover:text-emerald-200 flex items-center justify-between">
+                          <span>{tmpl.label}</span>
+                          <span className="text-[10px] text-emerald-500 group-hover:text-emerald-400 font-mono">Yuklash ↵</span>
+                        </div>
+                        <p className="text-[10px] text-emerald-500/80 line-clamp-1 mt-0.5">
+                          {tmpl.title}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: CUSTOM MEDIA UPLOAD (1-10 IMAGES & MP3 AUDIO) */}
           {activeTab === 'custom_media' && (
             <div className="space-y-6">
               
@@ -2021,6 +2326,27 @@ const App: React.FC = () => {
                     <span>🌿</span>
                     <span>JONGIYOH REELNI YARATISH</span>
                     <span className="text-xs bg-slate-950/20 px-2 py-0.5 rounded-full font-mono font-normal">YMYL Xavfsiz • 6-8 kadr</span>
+                  </div>
+                )}
+              </button>
+            ) : activeTab === 'text_to_video' ? (
+              <button
+                onClick={handleGenerateFromText}
+                disabled={state.isLoading || !rawTextInput.trim()}
+                className="w-full bg-gradient-to-r from-emerald-500 via-teal-500 to-green-600 hover:from-emerald-400 hover:to-green-500 disabled:opacity-50 text-slate-950 font-black py-4 px-6 rounded-2xl shadow-xl shadow-emerald-500/20 text-sm uppercase tracking-wider transition active:scale-98 flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/40"
+              >
+                {state.isLoading ? (
+                  <div className="flex items-center gap-2">
+                    <span className="animate-spin text-lg">⏳</span>
+                    <span>{state.loadingStep || "Matndan video yaratilmoqda..."}</span>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span>✍️</span>
+                    <span>MATNDAN VIDEO YARATISH</span>
+                    <span className="text-xs bg-slate-950/20 px-2 py-0.5 rounded-full font-mono font-normal">
+                      {targetSceneCount > 0 ? `${targetSceneCount} kadr` : 'Avto 4-7 kadr'} • Gemini TTS
+                    </span>
                   </div>
                 )}
               </button>

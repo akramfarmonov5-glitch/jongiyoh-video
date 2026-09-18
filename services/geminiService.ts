@@ -1023,3 +1023,220 @@ export const splitScriptIntoScenes = (
   }
   return result;
 };
+
+export interface TextToScriptOptions {
+  title?: string;
+  style?: ReelStyle;
+  genre?: VisualGenre;
+  modelEngine?: AIModelEngine;
+  targetSceneCount?: number;
+}
+
+/**
+ * 6. TEXT-TO-VIDEO SCRIPT GENERATOR:
+ * Converts arbitrary raw text into a professional, synchronized 9:16 vertical video script
+ * with complete sentences, visual prompts, headlines, and captions.
+ */
+export const generateScriptFromText = async (
+  rawText: string,
+  options: TextToScriptOptions = {}
+) => {
+  const cleanInput = rawText.trim();
+  if (!cleanInput) {
+    throw new Error("Matn bo'sh bo'lishi mumkin emas.");
+  }
+
+  const {
+    title,
+    style = ReelStyle.AUTO,
+    genre = VisualGenre.AUTO,
+    modelEngine = AIModelEngine.GEMINI_3_8_FLASH,
+    targetSceneCount = 0
+  } = options;
+
+  const sceneCountInstruction = targetSceneCount && targetSceneCount > 0
+    ? `Aniq ${targetSceneCount} ta kadr yarating.`
+    : `Matn uzunligiga qarab 4 tadan 7 tagacha optimal kadrlar ketma-ketligini yarating.`;
+
+  const prompt = `
+Siz professional ssenarist, multimedia rejissyori va O'zbek tilidagi qisqa vertikal videolar (Instagram Reels, TikTok, YouTube Shorts 9:16) bo'yicha mutaxassissiz.
+
+Foydalanuvchi taqdim etgan quyidagi xom matn (maqola, tabobat tavsiyasi, retsept, hikoya, she'r, motivatsiya yoki yangilik) asosida to'liq, yuqori sifatli video ssenariysini yarating:
+
+${title ? `FOYDALANUVCHI BERGAN MAVZU / SARLAVHA: "${title}"` : ''}
+
+ASOSIY MATN:
+"""
+${cleanInput}
+"""
+
+VAZIFA VA QAT'IY TALABLAR:
+1. ${sceneCountInstruction}
+2. Har bir kadr uchun diktor ovozi (narration):
+   - 100% tabiiy, chiroyli va ravon O'zbek tilida yozilsin.
+   - Har bir kadrda 1-2 ta SINTAKTIK TUGALLANGAN to'liq gap bo'lsin. Gap o'rtasida uzilib qolmasin!
+   - 1-kadr (hook): Tomoshabinni darhol qiziqtiruvchi, kuchli boshlanma.
+   - O'rta kadrlar: Asosiy mazmun, bosqichlar, foydali sirlar. Agar salomatlik/giyoh haqida bo'lsa, aniq doza va kimlarga mumkin emasligi aytilsin.
+   - Oxirgi kadr (cta): Videoni saqlab olish, ulashish yoki @jongiyoh_bot orqali maslahat olishga da'vat.
+3. Kadr visual_prompt_en (Ingliz tilida):
+   - Kadrning AYNAN SHU matniga mos, vertical 9:16 formatdagi kinematik fotografiya prompti.
+   - Uslub: Authentic documentary photography, 35mm lens, natural daylight, photorealistic 8k, warm cinematic color grading.
+   - TAQIQLANGAN: No neon, no cyberpunk glow, no split-screen, no collage, no text or letters inside the image.
+4. Muqova va sarlavhalar:
+   - cover_headline: 2-4 so'zdan iborat o'tkir, yirik muqova sarlavhasi (masalan: "BO'G'IMLARGA DAVO SIRI", "ERTALABKI MO''JIZA").
+   - cover_subtitle: Qisqa tushuntiruvchi taglavha.
+   - instagram_caption: Post uchun chiroyli emojilar bilan to'liq matn va CTA.
+   - hashtags: 6-10 ta dolzarb hashtag.
+
+Return ONLY a JSON object conforming to the schema.
+`;
+
+  try {
+    const response = await retry(() => callGeminiApi('generateContent', {
+      model: modelEngine || 'gemini-3.8-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            article_title: { type: "string" },
+            category: { type: "string" },
+            hook: { type: "string" },
+            scenes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  order: { type: "integer" },
+                  type: { type: "string" },
+                  narration: { type: "string" },
+                  headline: { type: "string" },
+                  statText: { type: "string" },
+                  visualMotion: { type: "string" },
+                  isInfographic: { type: "boolean" },
+                  visual_prompt_en: { type: "string" }
+                },
+                required: ["order", "type", "narration", "headline", "visual_prompt_en"]
+              }
+            },
+            full_script: { type: "string" },
+            instagram_caption: { type: "string" },
+            hashtags: { type: "array", items: { type: "string" } },
+            cover_headline: { type: "string" },
+            cover_subtitle: { type: "string" }
+          },
+          required: ["article_title", "scenes", "full_script", "instagram_caption", "cover_headline"]
+        }
+      }
+    }));
+
+    if (response?.text) {
+      const parsed = parseResponse(response.text);
+      const rawScenes = Array.isArray(parsed.scenes) && parsed.scenes.length >= 2 ? parsed.scenes : [];
+
+      if (rawScenes.length > 0) {
+        const resolvedTitle = parsed.article_title || title || cleanInput.slice(0, 45) + '...';
+        const motions: ('push-in' | 'zoom-out' | 'pan-left' | 'pan-right' | 'parallax')[] = [
+          'push-in', 'zoom-out', 'pan-left', 'push-in', 'pan-right', 'parallax'
+        ];
+
+        const normalizedScenes: ReelScene[] = rawScenes.map((s: any, idx: number) => {
+          const cleanNarration = cleanNarrationText(s.narration || "");
+          const isWarning = s.type === 'warning' || /qarshi|mumkin emas|taqiq|ehtiyot/i.test(`${s.headline} ${s.statText || ''} ${cleanNarration}`);
+
+          return {
+            id: `text_scene_${Date.now()}_${idx}`,
+            order: s.order || idx + 1,
+            type: isWarning ? 'warning' : (s.type || (idx === 0 ? 'hook' : idx === rawScenes.length - 1 ? 'cta' : 'benefit')),
+            narration: cleanNarration,
+            headline: s.headline || (isWarning ? "⚠️ QARSHI KO'RSATMALAR" : idx === 0 ? "MUHIM MA'LUMOT" : "TAVSIYA"),
+            statText: s.statText || "",
+            visualMotion: s.visualMotion || motions[idx % motions.length],
+            isInfographic: !!s.isInfographic || isWarning || !!s.statText,
+            visualPrompt: s.visual_prompt_en || `Authentic vertical 9:16 high-resolution documentary photograph representing: ${cleanNarration.slice(0, 70)}, natural warm daylight, true-to-life colors, shot on 35mm camera, strictly NO neon, NO text`,
+            infoCardData: s.statText ? {
+              title: s.headline || (isWarning ? "⚠️ DIQQAT" : "FOYDALI MASLAHAT"),
+              mainStat: s.statText,
+              subStat: "jongiyoh.uz",
+              label: isWarning ? "Xavfsizlik" : "Tavsiya"
+            } : undefined
+          };
+        });
+
+        const fullScript = normalizedScenes
+          .map(s => {
+            let t = cleanNarrationText(s.narration).trim();
+            if (!/[.!?]$/.test(t)) t += '.';
+            return t;
+          })
+          .join('\n\n');
+
+        return {
+          articleTitle: resolvedTitle,
+          category: parsed.category || "🌿 Salomatlik va Hayot",
+          hook: cleanNarrationText(parsed.hook || normalizedScenes[0]?.narration || resolvedTitle),
+          scenes: normalizedScenes,
+          fullScript,
+          scriptSegments: normalizedScenes.map(s => s.narration),
+          imagePrompts: normalizedScenes.map(s => s.visualPrompt),
+          caption: parsed.instagram_caption || `🌿 ${resolvedTitle}\n\n${fullScript}\n\n💬 Shaxsiy xavfsiz doza: @jongiyoh_bot\n🌐 Rasmiy sayt: jongiyoh.uz`,
+          hashtags: ensureStringArray(parsed.hashtags, ["#jongiyoh", "#salomatlik", "#foydalimaslahat", "#tabiiydavo", "#uzbekistan"]),
+          coverHeadline: parsed.cover_headline || (resolvedTitle.length > 28 ? resolvedTitle.substring(0, 28) + '...' : resolvedTitle),
+          coverSubtitle: parsed.cover_subtitle || "Foydali tavsiyalar va sirlar",
+          recipeCard: /damlama|choy|qirqbog|kurkumin|osh qoshiq|ml/i.test(cleanInput) ? {
+            title: `${resolvedTitle.slice(0, 24)} Retsepti`,
+            dosage: "1 osh qoshiq (5-10 gr)",
+            water: "200-250 ml qaynoq suv",
+            steepTime: "15-20 daqiqa damlash",
+            frequency: "Kuniga 2 mahal",
+            duration: "21 kunlik kurs",
+            warning: "Homiladorlik va surunkali kasalliklarda shifokor bilan maslahatlashing",
+            callToAction: "📌 Saqlab oling va yaqinlaringizga yuboring!"
+          } : undefined
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("generateScriptFromText API call failed, using intelligent segmentation fallback:", err);
+  }
+
+  // Fallback if Gemini fails or is unreachable
+  const targetCount = targetSceneCount && targetSceneCount > 0 ? targetSceneCount : 5;
+  const segments = splitScriptIntoScenes(cleanInput, targetCount);
+  const derivedTitle = title || cleanInput.split(/[.?!]/)[0]?.slice(0, 40) || "Salomatlik va Tabiat Sirlari";
+
+  const fallbackScenes: ReelScene[] = segments.map((seg, idx) => {
+    const isWarning = /qarshi|mumkin emas|taqiq|ehtiyot/i.test(seg);
+    const motions: ('push-in' | 'zoom-out' | 'pan-left' | 'pan-right')[] = ['push-in', 'zoom-out', 'pan-left', 'pan-right'];
+    return {
+      id: `text_fallback_${Date.now()}_${idx}`,
+      order: idx + 1,
+      type: isWarning ? 'warning' : (idx === 0 ? 'hook' : idx === segments.length - 1 ? 'cta' : 'benefit'),
+      narration: seg,
+      headline: isWarning ? "⚠️ OGOHLANTIRISH" : idx === 0 ? derivedTitle.slice(0, 24) : `TAVSIYA ${idx + 1}`,
+      statText: idx === 0 ? "MUHIM" : idx === segments.length - 1 ? "SAQLAB OLING" : "",
+      visualMotion: motions[idx % motions.length],
+      isInfographic: isWarning || idx === 0,
+      visualPrompt: `Authentic vertical 9:16 documentary photograph of ${derivedTitle}: ${seg.slice(0, 60)}, warm natural morning sunlight, 35mm lens, photorealistic 8k, strictly NO neon, NO text`
+    };
+  });
+
+  const fullFallbackScript = fallbackScenes.map(s => s.narration).join('\n\n');
+
+  return {
+    articleTitle: derivedTitle,
+    category: "🌿 Tabiiy Salomatlik",
+    hook: fallbackScenes[0]?.narration || derivedTitle,
+    scenes: fallbackScenes,
+    fullScript: fullFallbackScript,
+    scriptSegments: fallbackScenes.map(s => s.narration),
+    imagePrompts: fallbackScenes.map(s => s.visualPrompt),
+    caption: `🌿 ${derivedTitle}\n\n${fullFallbackScript}\n\n💬 Maslahat: @jongiyoh_bot\n🌐 Sayt: jongiyoh.uz`,
+    hashtags: ["#jongiyoh", "#salomatlik", "#tabiiydavo", "#foydalimaslahat", "#uzbekistan"],
+    coverHeadline: derivedTitle.slice(0, 28),
+    coverSubtitle: "Foydali tavsiyalar",
+    recipeCard: undefined
+  };
+};
+

@@ -30,7 +30,10 @@ export default async function handler(req: any, res: any) {
     // 2. Job status check: GET /api/veo?action=status&jobId=...
     if (req.method === 'GET' && action === 'status' && jobId) {
       try {
-        const response = await fetch(`${veoBackend}/api/jobs/${encodeURIComponent(jobId)}`);
+        let response = await fetch(`${veoBackend}/api/jobs/${encodeURIComponent(jobId)}`);
+        if (!response.ok) {
+          response = await fetch(`${veoBackend}/api/video-status?jobId=${encodeURIComponent(jobId)}`);
+        }
         const data = await response.json();
         return res.status(response.status).json(data);
       } catch (err: any) {

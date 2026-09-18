@@ -140,7 +140,10 @@ export const pollVeoJob = async (
 
     // Try direct local port 3001
     try {
-      const res = await fetch(`${DEFAULT_VEO_LOCAL_URL}/api/jobs/${jobId}`);
+      let res = await fetch(`${DEFAULT_VEO_LOCAL_URL}/api/jobs/${jobId}`);
+      if (!res.ok) {
+        res = await fetch(`${DEFAULT_VEO_LOCAL_URL}/api/video-status?jobId=${encodeURIComponent(jobId)}`);
+      }
       if (res.ok) {
         jobData = await res.json();
       }

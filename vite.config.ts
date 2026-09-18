@@ -108,6 +108,15 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 3000,
       host: '0.0.0.0',
+      watch: {
+        ignored: ['**/public/videos/**', '**/node_modules/**'],
+      },
+      proxy: {
+        '/videos': {
+          target: 'http://localhost:3001',
+          changeOrigin: true,
+        },
+      },
     },
     plugins: [
       react(),

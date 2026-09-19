@@ -210,18 +210,18 @@ export const pollVeoJob = async (
  */
 export const mapReelScenesToVeoScenes = (scenes: ReelScene[], topic: string): VeoScenePayload[] => {
   const cameraDirections = [
-    // Scene 1: Medium hook shot
-    "Medium eye-level shot, friendly and engaging natural presenter with gentle smile, warm natural daylight, sun-dappled botanical garden backdrop, slow smooth push-in camera motion,",
+    // Scene 1: Medium hook shot featuring brand face AZIZ
+    "Medium eye-level shot, AZIZ — a 21-year-old Uzbek man with slightly wavy short black hair, clean-shaven, bright lively brown eyes, energetic cheerful face, wearing a simple white t-shirt, friendly natural presenter with gentle smile, warm natural daylight, sun-dappled botanical garden backdrop, slow smooth push-in camera motion,",
     // Scene 2: Macro hands & tea leaves
     "Extreme macro close-up shot, gentle hands holding dried organic herbal leaves and blossoms over a rustic ceramic mortar, golden volumetric lighting, shallow depth of field, slow tilt,",
     // Scene 3: Teapot brewing action
     "Close-up documentary shot, hot boiling water slowly pouring into an authentic transparent glass teapot filled with herbal infusion, beautiful amber swirls, delicate steam rising, slow orbiting camera,",
     // Scene 4: Traditional herbal heritage / caution
     "Atmospheric cinematic shot of a vintage wooden apothecary table, antique medical book manuscript, brass herbal balance scale, warm directional Rembrandt lighting, serious reflective mood,",
-    // Scene 5: Healthy mobility & nature
-    "Cinematic wide tracking shot, active healthy person gracefully walking along a scenic fresh green mountain path, vitality, joyful energy, golden hour backlight, smooth gimbal movement,",
+    // Scene 5: Healthy mobility & nature featuring the same presenter AZIZ
+    "Cinematic wide tracking shot, AZIZ — the same 21-year-old Uzbek man wearing a white t-shirt, same face, walking with joyful energy along a scenic fresh green mountain path, vitality, healthy back mobility, golden hour backlight, smooth gimbal movement,",
     // Scene 6: Smartphone & Telegram CTA
-    "Clean aesthetic lifestyle shot on a cozy wooden cafe table, hands holding a modern smartphone opening the Telegram chat, steaming teacup beside it, warm soft lighting, slow zoom-out."
+    "Clean aesthetic lifestyle shot on a cozy wooden cafe table, AZIZ's hands holding a modern smartphone opening the Telegram chat, steaming teacup beside it, warm soft lighting, slow zoom-out."
   ];
 
   return scenes.map((scene, idx) => {
